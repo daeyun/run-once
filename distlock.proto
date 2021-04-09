@@ -1,0 +1,170 @@
+syntax = "proto3";
+
+package distlock;
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/duration.proto";
+
+// A key-value lock service. The intended purpose is to prevent computing
+// the same thing twice in distributed pipeline jobs.
+service LockManagerService {
+  // Attempts to acquire or refresh a single expiring lock.
+  rpc AcquireLock (AcquireLockRequest) 
+      returns (AcquireLockResponse);
+
+  // Batches AcquireLock but can terminate after acquiring N locks.
+  rpc AcquireMany (AcquireManyRequest)
+      returns (AcquireManyResponse);
+
+  // Releases a single lock, removing it from the database. Locks do not have to
+  // be released and can remain in the database to serve as lookup keys.
+  rpc ReleaseLock (ReleaseLockRequest)
+      returns (ReleaseLockResponse);
+
+  // Processes multiple requests.
+  rpc ProcessBatch (ProcessBatchRequest)
+      returns (ProcessBatchResponse);
+
+  // Lists all locks in the database that match the query.
+  rpc ListLocks (ListLocksRequest)
+      returns (ListLocksResponse);
+
+  // Returns unix time. Intended to provide globally consistent timestamps.
+  rpc GetCurrentServerTime (GetCurrentServerTimeRequest)
+      returns (GetCurrentServerTimeResponse);
+}
+
+// Expired locks aren't automatically garbage collected but can be overwritten
+// or manually removed using ReleaseLock().
+message Lock {
+  string global_id = 1;
+
+  // Never expires if 0. This value does not change unless the whole Lock
+  // instance is overwritten.
+  google.protobuf.Duration expires_in = 2;
+
+  // If empty, the lock is not acquired.
+  google.protobuf.Timestamp acquired_since = 3;
+
+  // Mostly intended for debugging, e.g. to check which worker crashed and
+  // failed to release the lock. Does not affect functionality. Contains
+  // previous owner if expired.
+  string last_owner_name = 4;
+  bytes data = 5;  // Intended for special cases.
+}
+
+// A lock can be acquired if never acquired or expired.
+message AcquireLockRequest {
+  Lock lock = 1;  // global_id and expires_in are required.
+  bool overwrite = 2;  // Forcefully acquire regardless of expiration.
+}
+
+message AcquireLockResponse {
+  // The same lock stored in the system. `acquired_since` is set by the server.
+  // Not set if not acquired.
+  Lock acquired_lock = 1;
+
+  // If acquired, this is the previous lock before being overwritten. Can be an
+  // expired lock. Contains `acquired_since` as-is.
+  // If not acquired, this is the current lock.
+  // Not set if another lock with the same key didn't exist.
+  Lock existing_lock = 2;
+  google.protobuf.Duration elapsed = 15;
+}
+
+// Can search for and acquire the first available lock in a single request.
+message AcquireManyRequest {
+  // Each sub-request is atomic, but the whole set isn't.
+  repeated AcquireLockRequest requests = 1;
+  // Terminates after acquiring this many locks. Defaults to requests_size() if
+  // not set or 0.
+  uint32 max_acquired_locks = 2;
+}
+
+// Does not return the same number of responses as requests if terminated early.
+// But the first N responses should be in the same order as requests.
+message AcquireManyResponse {
+  repeated AcquireLockResponse responses = 1;
+}
+
+// Removes a lock from the database, as if it was never acquired.
+message ReleaseLockRequest {
+  // global_id is required. Other fields do not matter.
+  Lock lock = 1;
+  // Concurrent ReleaseLock ops will be faster if this is false.
+  bool return_released_lock = 2;
+}
+
+message ReleaseLockResponse {
+  // Set only if `return_released_lock` was true and there was a matching lock
+  // in the database. Can be either expired and unexpired.
+  Lock released_lock = 1;
+  google.protobuf.Duration elapsed = 15;
+}
+
+// Wrapper to support repeated oneof.
+message AnyRequest {
+  oneof request {
+    AcquireLockRequest acquire_lock_request = 1;
+    AcquireManyRequest acquire_many_request = 2;
+    ReleaseLockRequest release_lock_request = 3;
+    GetCurrentServerTimeRequest get_current_server_time_request = 4;
+    ListLocksRequest list_locks_request = 5;
+  }
+}
+
+message AnyResponse {
+  oneof response {
+    AcquireLockResponse acquire_lock_response = 1;
+    AcquireManyResponse acquire_many_response = 2;
+    ReleaseLockResponse release_lock_response = 3;
+    GetCurrentServerTimeResponse get_current_server_time_response = 4;
+    ListLocksResponse list_locks_response = 5;
+  }
+}
+
+// Empty for now.
+message GetCurrentServerTimeRequest {
+}
+
+message GetCurrentServerTimeResponse {
+  google.protobuf.Timestamp server_time = 1;
+}
+
+message ProcessBatchRequest {
+  repeated AnyRequest requests = 1;  // Ordered.
+
+  // If true, other requests will block until the whole list is processed.
+  // If false, each sub-request will be atomic but the whole list won't be.
+  bool is_synchronized = 2;
+}
+
+// Contains the same number of responses as requests and in the same order.
+message ProcessBatchResponse {
+  repeated AnyResponse responses = 1;
+  google.protobuf.Duration elapsed = 15;
+}
+
+message LockMatchExpression {
+  // Logical AND conditions.
+  string global_id_regex = 1;  // Matches the whole global_id string.
+  bool is_expired = 2;
+}
+
+// Expect this to be slow. Took 55 ms to iterate through 60k results.
+message ListLocksRequest {
+  // Considers global_ids in the range [start, end) in lexicographic order.
+  // The keys can be rough prefixes and do not have to be exact.
+  // See https://github.com/google/leveldb/blob/master/doc/index.md#iteration
+  string start_key = 1;  // std::begin() if empty.
+  string end_key = 2;  // std::end() if empty.
+
+  // Each list represents logical OR conditions.
+  repeated LockMatchExpression includes = 3;  // Include all if empty.
+  repeated LockMatchExpression excludes = 4;  // Exclude matching results.
+}
+
+message ListLocksResponse {
+  repeated Lock locks = 1;
+  google.protobuf.Duration elapsed = 15;
+}
