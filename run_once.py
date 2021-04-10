@@ -1,7 +1,7 @@
 """
 Client-side API for distributed task parallelism.
 
-https://github.com/daeyun/distributed-iterator
+https://github.com/daeyun/run-once
 """
 
 __license__ = "MIT"
