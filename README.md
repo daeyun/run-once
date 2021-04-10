@@ -1,4 +1,4 @@
-Easy distributed task parallelism in Python.
+Easy distributed task parallelism in Python. Inspired by [Joblib](https://joblib.readthedocs.io/en/latest/) but supports multi-machine distribution.
 
 ## run-once
 
