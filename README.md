@@ -79,7 +79,7 @@ This is more flexible but makes more RPC calls than the iterator version.
 
 ```python
 for key in task_keys:
-    @run_once(key, timeout=3)
+    @run_once.distributed_task(key, timeout=3)
     def work():
         ...  # Throw on failure.
 
