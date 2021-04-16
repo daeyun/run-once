@@ -233,8 +233,7 @@ class Status(enum.Enum):
 
 
 def notify_success(key):
-    """Acquires a non-expiring lock and discards it. This prevents `key` from
-    being processed by anyone until manually released.
+    """Prevents `key` from being processed by anyone until manually released.
 
     This function is intended to be called after a successful completion of the
     task represented by the key.
@@ -242,8 +241,13 @@ def notify_success(key):
     Args:
         key: A string key to permanently lock.
     """
-    lock, _ = try_lock(make_lock(key, expiration_seconds=0), force=True)
-    assert lock is not None
+    acquired_lock, existing_lock = try_lock(make_lock(key, expiration_seconds=0), force=True)
+    assert acquired_lock is not None
+    assert existing_lock is not None
+
+    expires_in = existing_lock.expires_in
+    if expires_in.seconds == 0 and expires_in.nanos == 0:
+        raise ValueError('Completed more than once: {}'.format(key))
 
 
 def notify_failure(key):
