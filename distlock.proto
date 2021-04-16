@@ -9,7 +9,7 @@ import "google/protobuf/duration.proto";
 // the same thing twice in distributed pipeline jobs.
 service LockManagerService {
   // Attempts to acquire or refresh a single expiring lock.
-  rpc AcquireLock (AcquireLockRequest) 
+  rpc AcquireLock (AcquireLockRequest)
       returns (AcquireLockResponse);
 
   // Batches AcquireLock but can terminate after acquiring N locks.
@@ -28,6 +28,10 @@ service LockManagerService {
   // Lists all locks in the database that match the query.
   rpc ListLocks (ListLocksRequest)
       returns (ListLocksResponse);
+
+  // Counts all locks in the database that match the query.
+  rpc CountLocks (CountLocksRequest)
+      returns (CountLocksResponse);
 
   // Returns unix time. Intended to provide globally consistent timestamps.
   rpc GetCurrentServerTime (GetCurrentServerTimeRequest)
@@ -154,7 +158,7 @@ message LockMatchExpression {
 // Expect this to be slow. Took 55 ms to iterate through 60k results.
 message ListLocksRequest {
   // Considers global_ids in the range [start, end) in lexicographic order.
-  // The keys can be rough prefixes and do not have to be exact.
+  // The keys do not have to exist.
   // See https://github.com/google/leveldb/blob/master/doc/index.md#iteration
   string start_key = 1;  // std::begin() if empty.
   string end_key = 2;  // std::end() if empty.
@@ -166,5 +170,18 @@ message ListLocksRequest {
 
 message ListLocksResponse {
   repeated Lock locks = 1;
+  google.protobuf.Duration elapsed = 15;
+}
+
+message CountLocksRequest {
+  // See `ListLocksRequest`.
+  string start_key = 1;  // std::begin() if empty.
+  string end_key = 2;  // std::end() if empty.
+}
+
+message CountLocksResponse {
+  uint64 expired = 1;        // Error.
+  uint64 unexpired = 2;      // In progress.
+  uint64 no_expiration = 3;  // Completed.
   google.protobuf.Duration elapsed = 15;
 }

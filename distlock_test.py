@@ -93,7 +93,7 @@ def test_failed_lock_attempt(stub):
         ).responses
         assert len(response) == 3
         for r in response:
-            assert r.elapsed.nanos < 400000, r.elapsed
+            assert r.elapsed.nanos < 800000, r.elapsed
         assert not response[0].HasField("existing_lock")
         assert response[0].HasField("acquired_lock")
         assert not response[1].HasField("existing_lock")
@@ -326,6 +326,41 @@ def test_list_locks(stub):
     assert response.locks[1].global_id == "!!00039"
 
 
+def test_count_locks(stub):
+    keys_and_expiration = [
+        ("0000", 0),
+        ("1000", 1),
+        ("0001", 0),
+        ("0002", 0.0001),
+        ("1003", 0),
+        ("0003", 0.0002),
+        ("0004", 100),
+        ("0005", 1002),
+        ("0006", 60),
+        ("0007", 60),
+    ]
+
+    for key, expiration_seconds in keys_and_expiration:
+        request = distlock_pb2.AcquireLockRequest(
+            lock=distlock_pb2.Lock(
+                global_id=key, expires_in=make_duration(expiration_seconds)
+            )
+        )
+        response: distlock_pb2.AcquireLockResponse = stub.AcquireLock(
+            request, timeout=10
+        )
+    time.sleep(0.01)
+
+    # [0001, 0007)
+    request = distlock_pb2.CountLocksRequest(start_key="0001", end_key="0007")
+    response: distlock_pb2.CountLocksResponse = stub.CountLocks(
+        request, timeout=10
+    )
+    assert response.no_expiration == 1
+    assert response.expired == 2
+    assert response.unexpired == 3
+
+
 @pytest.fixture(scope="function")
 def stub():
     host = "127.0.0.1:{}".format(port)
@@ -364,7 +399,7 @@ def server():
             if connection.laddr.port == port:
                 log.info("Process found: {}".format(process))
                 assert (
-                        process.name() == "distlock"
+                    process.name() == "distlock"
                 ), f"Another process is using port {port}"
                 log.info("Using port: {}".format(connection.laddr.port))
                 process.send_signal(signal.SIGTERM)

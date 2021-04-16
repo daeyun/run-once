@@ -9,7 +9,7 @@ set(CMAKE_CXX_FLAGS_DEBUG "-g")
 set(CMAKE_CXX_FLAGS_RELEASE "-O3 -Wno-unused")
 
 
-# Run protoc manually before running cmake.
+# Run protoc before running cmake. See build.sh
 file(GLOB GENERATED_PROTOBUF_FILES ${CMAKE_SOURCE_DIR}/generated/proto/*.pb.cc ${CMAKE_SOURCE_DIR}/generated/proto/*.pb.h)
 set_source_files_properties(${GENERATED_PROTOBUF_FILES} PROPERTIES GENERATED TRUE)  # this doesn't seem to help for some reason
 message(STATUS "Found generated protobuf files: ${GENERATED_PROTOBUF_FILES}")

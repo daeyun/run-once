@@ -232,22 +232,24 @@ class Status(enum.Enum):
     SKIP_IN_PROGRESS = 4
 
 
-def notify_success(key):
+def notify_success(key, assert_unique=True):
     """Prevents `key` from being processed by anyone until manually released.
 
-    This function is intended to be called after a successful completion of the
-    task represented by the key.
+    This function is intended to be called after task completion.
 
     Args:
         key: A string key to permanently lock.
     """
-    acquired_lock, existing_lock = try_lock(make_lock(key, expiration_seconds=0), force=True)
+    acquired_lock, existing_lock = try_lock(
+        make_lock(key, expiration_seconds=0), force=True
+    )
     assert acquired_lock is not None
     assert existing_lock is not None
 
-    expires_in = existing_lock.expires_in
-    if expires_in.seconds == 0 and expires_in.nanos == 0:
-        raise ValueError('Completed more than once: {}'.format(key))
+    if assert_unique:
+        expires_in = existing_lock.expires_in
+        if expires_in.seconds == 0 and expires_in.nanos == 0:
+            raise ValueError("Completed more than once: {}".format(key))
 
 
 def notify_failure(key):
@@ -331,8 +333,7 @@ def make_lock(
 def search_keys_by_prefix(key_prefix: str, is_expired=None) -> Sequence[str]:
     """Scans the database to find a list of keys that start with `key_prefix`.
 
-    Does not include released lock keys, since they were removed from the
-    database.
+    Does not include released keys, since they were removed from the database.
 
     Args:
         key_prefix: A string prefix to match.
@@ -344,8 +345,7 @@ def search_keys_by_prefix(key_prefix: str, is_expired=None) -> Sequence[str]:
     """
     client = lock_service_client()
 
-    # This is a hack to guarantee `end_key` to be the last key in byte-wise
-    # lexicographic order. `end_key` is exclusive.
+    # `end_key` is exclusive. The suffix makes sure it comes after other keys.
     end_key = key_prefix + "\U0010fffe"  # 244, 143, 191, 191
     start_key = key_prefix
 
@@ -378,6 +378,51 @@ def search_keys_by_prefix(key_prefix: str, is_expired=None) -> Sequence[str]:
         else:
             start_key = response.locks[-1].global_id
             ret.extend([item.global_id for item in response.locks[:-1]])
+    return ret
+
+
+def count_keys_by_prefix(key_prefix: str) -> Dict[str, int]:
+    """Scans the database to count keys that start with `key_prefix`.
+
+    Does not include released keys, since they were removed from the database.
+
+    Args:
+        key_prefix: A string prefix to match.
+        is_expired: An optional boolean specifying whether we want to list
+          expired or unexpired keys.
+
+    Returns:
+        A dict contain,
+            expired -> Number of expired locks
+            unexpired -> Number of locks that may expire eventually.
+            no_expiration -> Number of locks do not expire.
+        They are mutually exclusive.
+    """
+    client = lock_service_client()
+
+    # `end_key` is exclusive. The suffix makes sure it comes after other keys.
+    end_key = key_prefix + "\U0010fffe"  # 244, 143, 191, 191
+    start_key = key_prefix
+
+    request = distlock_pb2.CountLocksRequest(
+        start_key=start_key,
+        end_key=end_key,
+    )
+
+    response: distlock_pb2.ListLocksResponse = client.CountLocks(
+        request, timeout=rpc_timeout
+    )
+
+    assert response.HasField("expired")
+    assert response.HasField("unexpired")
+    assert response.HasField("no_expiration")
+
+    ret = {
+        "expired": response.expired,
+        "unexpired": response.unexpired,
+        "no_expiration": response.no_expiration,
+    }
+
     return ret
 
 

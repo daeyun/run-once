@@ -107,6 +107,12 @@ class LockManagerServiceImpl final
     return IsOK([&] { ListLocks(request, response); });
   }
 
+  Status CountLocks(ServerContext *context,
+                   const distlock::CountLocksRequest *request,
+                   distlock::CountLocksResponse *response) override {
+    return IsOK([&] { CountLocks(request, response); });
+  }
+
   Status GetCurrentServerTime(
       ServerContext *context,
       const distlock::GetCurrentServerTimeRequest *request,
@@ -183,8 +189,7 @@ class LockManagerServiceImpl final
     string value_str;
     {  // Critical section. Keep it minimal. Get() and Put() must be
        // synchronized.
-      const std::lock_guard<std::recursive_mutex> lock_guard(
-          db_write_mutex);  // System lock.
+      const std::lock_guard<std::recursive_mutex> lock_guard(db_write_mutex);
       leveldb::Status lookup_status = LookupKey(global_id, &value_str);
 
       bool can_acquire = false;
@@ -360,16 +365,15 @@ class LockManagerServiceImpl final
                             return it->Valid() && it->key().ToString() < limit;
                           });
 
-    const auto current_time = GetCurrentTime();
 
     size_t output_size = 0;
 
     for (; has_next(); it->Next()) {
       distlock::Lock lock;
       Ensures(lock.ParseFromArray(it->value().data(), it->value().size()));
-
-      const auto unary = [&lock, &current_time,
-                          this](const distlock::LockMatchExpression &expr) {
+      const auto unary = [&lock, this](
+          const distlock::LockMatchExpression &expr) {
+        const auto current_time = GetCurrentTime();
         return IsFullMatch(expr, lock, current_time);
       };
       bool is_included = true;
@@ -393,6 +397,55 @@ class LockManagerServiceImpl final
 
     Ensures(it->status().ok());
     delete it;
+    *response->mutable_elapsed() = GetCurrentTime() - start_time;
+  }
+
+  void CountLocks(const distlock::CountLocksRequest *request,
+                 distlock::CountLocksResponse *response) const {
+    const auto start_time = GetCurrentTime();
+    leveldb::Iterator *it = get_db()->NewIterator(leveldb::ReadOptions());
+
+    if (request->start_key().empty()) {
+      it->SeekToFirst();
+    } else {
+      it->Seek(request->start_key());
+    }
+
+    const auto &limit = request->end_key();
+    auto has_next = limit.empty()
+                        ? std::function<bool()>([&it] { return it->Valid(); })
+                        : std::function<bool()>([&it, &limit] {
+                            return it->Valid() && it->key().ToString() < limit;
+                          });
+
+    size_t num_expired = 0;
+    size_t num_unexpired = 0;
+    size_t num_no_expiration = 0;
+
+    for (; has_next(); it->Next()) {
+      distlock::Lock lock;
+      Ensures(lock.ParseFromArray(it->value().data(), it->value().size()));
+
+      using google::protobuf::util::TimeUtil;
+      if (not lock.has_expires_in() or
+          TimeUtil::DurationToNanoseconds(lock.expires_in()) == 0) {
+        ++num_no_expiration;
+      } else {
+        const auto current_time = GetCurrentTime();
+        if (lock.acquired_since() + lock.expires_in() <= current_time) {
+          ++num_expired;
+        } else {
+          ++num_unexpired;
+        }
+      }
+    }
+
+    Ensures(it->status().ok());
+    delete it;
+
+    response->set_expired(num_expired);
+    response->set_unexpired(num_unexpired);
+    response->set_no_expiration(num_no_expiration);
     *response->mutable_elapsed() = GetCurrentTime() - start_time;
   }
 
