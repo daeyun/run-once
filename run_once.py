@@ -388,14 +388,12 @@ def count_keys_by_prefix(key_prefix: str) -> Dict[str, int]:
 
     Args:
         key_prefix: A string prefix to match.
-        is_expired: An optional boolean specifying whether we want to list
-          expired or unexpired keys.
 
     Returns:
-        A dict contain,
-            expired -> Number of expired locks
-            unexpired -> Number of locks that may expire eventually.
-            no_expiration -> Number of locks do not expire.
+        A dict:
+            expired -> Number of expired keys.
+            in_progress -> Number of keys that may expire eventually.
+            success -> Number of keys that do not expire.
         They are mutually exclusive.
     """
     client = lock_service_client()
@@ -413,14 +411,10 @@ def count_keys_by_prefix(key_prefix: str) -> Dict[str, int]:
         request, timeout=rpc_timeout
     )
 
-    assert response.HasField("expired")
-    assert response.HasField("unexpired")
-    assert response.HasField("no_expiration")
-
     ret = {
         "expired": response.expired,
-        "unexpired": response.unexpired,
-        "no_expiration": response.no_expiration,
+        "in_progress": response.unexpired,
+        "success": response.no_expiration,
     }
 
     return ret
