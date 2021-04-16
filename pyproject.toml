@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "run_once"
-version = "0.4.1"
+version = "0.4.2"
 description = ""
 authors = ["Daeyun Shin <daeyuns@uci.edu>"]
 license = "MIT"
@@ -19,6 +19,7 @@ python = "^3.6"
 grpcio = "^1.15"
 protobuf = "^3.10"
 joblib = "^1.0.1"
+importlib-metadata = {version = "^1.0", python = "<3.8"}
 
 [tool.poetry.dev-dependencies]
 grpcio-tools = "^1.15"

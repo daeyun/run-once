@@ -1,10 +1,7 @@
 """
-Client-side API for distributed task parallelism.
-
+Easy distributed task parallelism in Python.
 https://github.com/daeyun/run-once
 """
-
-__license__ = "MIT"
 
 import configparser
 import contextlib
@@ -22,6 +19,14 @@ from typing import Dict, Sequence, Optional, Union, KeysView
 import grpc
 from google.protobuf import duration_pb2
 from grpc._channel import _InactiveRpcError
+
+try:
+    import importlib.metadata as importlib_metadata
+except ModuleNotFoundError:
+    import importlib_metadata
+
+__version__ = importlib_metadata.version(__name__)
+__license__ = "MIT"
 
 rpc_timeout = 10
 
